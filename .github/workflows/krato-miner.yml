@@ -1,0 +1,23 @@
+name: krato-miner
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC (~06:00 UK) — balde de token Keepa cheio
+  workflow_dispatch: {}    # permite rodar manual pelo botao/gh
+
+jobs:
+  mine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120     # o plano Keepa 1-token/min pausa; damos folga
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Krato miner (pesquisa de mercado via Keepa)
+        env:
+          KEEPA_KEY: ${{ secrets.KEEPA_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          N_IDEAS: "6"
+          PRICE_MIN: "3"
+          PRICE_MAX: "300"
+          BSR_MAX: "500000"
+        run: python3 krato-miner/krato_miner.py
