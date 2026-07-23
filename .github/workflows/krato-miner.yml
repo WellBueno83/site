@@ -2,7 +2,7 @@ name: krato-miner
 
 on:
   schedule:
-    - cron: "30 2 * * *"   # 02:30 UTC = 03:30 UK (BST) — comeca cedo p/ o relatorio estar PRONTO as 04:30 quando o Well acorda (Keepa pausa ~20-30min)
+    - cron: "0 1 * * *"    # 01:00 UTC = 02:00 UK (BST) — cedo p/ dar folga ao atraso tipico do cron do GitHub e o pacing do Keepa, e estar PRONTO antes das 04:30
   workflow_dispatch: {}    # permite rodar manual pelo botao/gh
 
 jobs:
