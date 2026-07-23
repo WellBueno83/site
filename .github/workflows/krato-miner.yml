@@ -16,6 +16,8 @@ jobs:
           KEEPA_KEY: ${{ secrets.KEEPA_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           N_IDEAS: "6"
           PRICE_MIN: "3"
           PRICE_MAX: "300"

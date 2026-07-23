@@ -15,9 +15,11 @@ import json
 import time
 import gzip
 import html
+import smtplib
 import urllib.request
 import urllib.parse
 import urllib.error
+from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta
 
 # ---------- Config ----------
@@ -31,6 +33,11 @@ F_DATA = "fld92cl3FO8zKPW6l"       # Data (DD/MM/YYYY)
 F_SESSION = "fldG5W2UbWY3PGqGw"    # Sessao
 F_RESULT = "fldNfGOrSKpAtPYCF"     # Resultado (HTML)
 F_SESSID = "fldqadmkDBQPZiBOJ"     # Name / session id
+
+# E-mail (Gmail SMTP com App Password) — só envia se as creds existirem
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+EMAIL_TO = os.environ.get("EMAIL_TO", "wellbuenorider@gmail.com")
 
 N_IDEAS = int(os.environ.get("N_IDEAS", "8"))
 BSR_MAX = int(os.environ.get("BSR_MAX", "20000"))     # BSR acima disso = vende pouco
@@ -87,24 +94,22 @@ def _post(url, payload, timeout=60):
 # ---------- 1. Gemini: gerar ideias ----------
 def gemini_ideas(n):
     sys = (
-        "You are Krato's market-research agent. Krato is a UK platform serving Brazilian "
-        "micro-entrepreneurs in the UK who sell COUNTRY/WESTERN fashion ('moda country') and "
-        "SEMIJOIAS (costume jewelry) + accessories, and who need branding supplies + POS tools. "
-        "Output ONLY a raw JSON array, no markdown, no code fences. "
-        f"Exactly {n} product objects, MIXING these 4 research categories (roughly balanced): "
-        "(1) country_fashion - western/country style clothing on Amazon UK (western plaid shirt, "
-        "cowboy boots, western belt buckle, cowboy hat, western dress); "
-        "(2) jewelry - costume jewelry / semijoias / fashion accessories (gold plated hoop earrings, "
-        "layered necklace, stainless steel ring, hair clips); "
-        "(3) packaging - branding/packaging supplies for small sellers (velvet jewelry pouch, "
-        "custom tissue paper, gift box, jewelry display stand, kraft mailing bag); "
-        "(4) hardware - POS tools (barcode scanner, thermal label printer, receipt printer). "
+        "You are Krato's market-research agent for a UK platform. Output ONLY a raw JSON array, "
+        "no markdown, no code fences. Produce EXACTLY 6 product objects, ONE for EACH slot in order: "
+        "1) a BARCODE SCANNER (category hardware); "
+        "2) a THERMAL LABEL PRINTER (category hardware); "
+        "3) a LABEL product - barcode label rolls or jewelry hang/rat-tail tags (category packaging); "
+        "4) a MODA COUNTRY / western-style clothing item - western plaid shirt, cowboy boots, "
+        "western belt, cowboy hat (category country_fashion); "
+        "5) a SEMIJOIA / costume jewelry piece - gold plated hoop earrings, layered necklace, "
+        "stainless steel ring (category jewelry); "
+        "6) a FASHION ACCESSORY - leather belt, scarf, hair accessory, sunglasses (category country_fashion). "
         "Each object keys: name_en, name_pt (Brazilian Portuguese), emoji (one emoji), "
-        "category (exactly one of: country_fashion, jewelry, packaging, hardware), "
+        "category (hardware | packaging | country_fashion | jewelry), "
         "keyword (a COMMON Amazon.co.uk search phrase of 2-4 words that returns many real listings), "
         "est_cost_gbp (rough number), country (string), supplier (string or 'A confirmar'), "
-        "reason (string, max 120 chars). This is MARKET RESEARCH - we want real Amazon UK prices + "
-        "demand (BSR) across these categories to analyse. Output ONLY the JSON array."
+        "reason (string, max 120 chars). MARKET RESEARCH - real Amazon UK prices, demand + images. "
+        "Output ONLY the JSON array."
     )
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
            "gemini-2.5-flash:generateContent?key=" + GEMINI_KEY)
@@ -161,11 +166,14 @@ def keepa_products(asins):
         def val(i):
             return avg90[i] if len(avg90) > i and avg90[i] not in (None, -1) else None
         price = val(1) or val(0)   # New price senão Amazon price (pence)
+        img_id = (p.get("imagesCSV") or "").split(",")[0].strip()
+        image = f"https://images-na.ssl-images-amazon.com/images/I/{img_id}" if img_id else ""
         out.append({
             "asin": p.get("asin"),
             "price_gbp": round(price / 100, 2) if price else None,
             "bsr": val(3),
             "title": p.get("title", ""),
+            "image": image,
         })
     return out
 
@@ -214,6 +222,7 @@ def card_html(x):
 <table width="100%" cellpadding="14" cellspacing="0" border="0" bgcolor="#ffffff"
  style="background-color:#ffffff;border:1px solid #eeeeee;margin-bottom:12px;font-family:sans-serif">
 <tr><td>
+  <img src="{e(x.get('image',''))}" alt="" width="100" style="float:right;margin:0 0 8px 12px;border:1px solid #eeeeee;background:#ffffff">
   <span style="background-color:{BRAND['gold']};color:#fff;font-size:10px;font-weight:bold;padding:2px 6px">{e(CAT_LABEL.get(x.get('category'), x.get('category','')))}</span><br>
   <span style="font-size:16px;font-weight:bold;color:{BRAND['navy']}">{e(x.get('name_en'))}{hot}</span>
   <span style="font-size:13px;color:{BRAND['muted']}"> {e(x.get('name_pt'))}</span> {e(x.get('emoji',''))}
@@ -273,6 +282,23 @@ def airtable_write(date_str, sessid, html_report):
         return json.loads(r.read().decode())
 
 
+# ---------- 5. E-mail (visual, com imagens) ----------
+def send_email(subject, html_report):
+    if not (GMAIL_USER and GMAIL_APP_PASSWORD):
+        print("  [email] sem creds Gmail - pulando envio (grava so no Airtable)")
+        return
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_USER
+    msg["To"] = EMAIL_TO
+    msg.set_content("Seu leitor nao suporta HTML. Veja o relatorio no Airtable.")
+    msg.add_alternative(html_report, subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
+        s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        s.send_message(msg)
+    print("  [email] enviado para", EMAIL_TO)
+
+
 def main():
     now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=1)))  # ~UK
     date_str = now.strftime("%d/%m/%Y")
@@ -292,6 +318,7 @@ def main():
     report = build_report(rows, date_str)
     res = airtable_write(date_str, sessid, report)
     print("Airtable record:", res.get("id"))
+    send_email(f"Krato - Pesquisa de Mercado (Keepa) | {date_str}", report)
     print("DONE")
 
 
