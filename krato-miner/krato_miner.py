@@ -75,20 +75,37 @@ EXCLUSION = [
 BRAND = dict(navy="#1a1a2e", gold="#C8A96E", muted="#8a8a8a", body="#2c2c2c", bg="#eef0f2")
 
 
+def _http(req, timeout=60):
+    """Faz a requisição com retentativa em erro transitório (5xx / timeout / rede)."""
+    last = None
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read()
+            if raw[:2] == b"\x1f\x8b":
+                raw = gzip.decompress(raw)
+            return json.loads(raw.decode())
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code < 500:   # 4xx = erro do cliente, nao adianta repetir
+                raise
+            print(f"  [retry] HTTP {e.code} (tentativa {attempt + 1}/4), aguardando...")
+        except Exception as e:
+            last = e
+            print(f"  [retry] {type(e).__name__} (tentativa {attempt + 1}/4), aguardando...")
+        time.sleep(6 * (attempt + 1))
+    raise last
+
+
 def _get(url, timeout=60):
     req = urllib.request.Request(url, headers={"User-Agent": "krato-miner", "Accept-Encoding": "gzip"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read()
-        if raw[:2] == b"\x1f\x8b":
-            raw = gzip.decompress(raw)
-        return json.loads(raw.decode())
+    return _http(req, timeout)
 
 
 def _post(url, payload, timeout=60):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    return _http(req, timeout)
 
 
 # ---------- 1. Gemini: gerar ideias ----------
