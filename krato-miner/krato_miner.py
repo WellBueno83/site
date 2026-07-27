@@ -110,36 +110,22 @@ def _post(url, payload, timeout=60):
 
 # ---------- 1. Gemini: gerar ideias ----------
 def gemini_ideas(n):
-    sys = (
-        "You are Krato's market-research agent for a UK platform. Output ONLY a raw JSON array, "
-        "no markdown, no code fences. Produce EXACTLY 6 product objects, ONE for EACH slot in order: "
-        "1) a BARCODE SCANNER (category hardware); "
-        "2) a THERMAL LABEL PRINTER (category hardware); "
-        "3) a LABEL product - barcode label rolls or jewelry hang/rat-tail tags (category packaging); "
-        "4) a MODA COUNTRY / western-style clothing item - western plaid shirt, cowboy boots, "
-        "western belt, cowboy hat (category country_fashion); "
-        "5) a SEMIJOIA / costume jewelry piece - gold plated hoop earrings, layered necklace, "
-        "stainless steel ring (category jewelry); "
-        "6) a FASHION ACCESSORY - leather belt, scarf, hair accessory, sunglasses (category country_fashion). "
-        "Each object keys: name_en, name_pt (Brazilian Portuguese), emoji (one emoji), "
-        "category (hardware | packaging | country_fashion | jewelry), "
-        "keyword (a COMMON Amazon.co.uk search phrase of 2-4 words that returns many real listings), "
-        "est_cost_gbp (rough number), country (string), supplier (string or 'A confirmar'), "
-        "reason (string, max 120 chars). MARKET RESEARCH - real Amazon UK prices, demand + images. "
-        "Output ONLY the JSON array."
-    )
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.5-flash:generateContent?key=" + GEMINI_KEY)
-    payload = {
-        "system_instruction": {"parts": [{"text": sys}]},
-        "contents": [{"role": "user", "parts": [{"text": "Generate the ideas now as a raw JSON array."}]}],
-        "generationConfig": {"temperature": 1.0, "maxOutputTokens": 2048,
-                             "thinkingConfig": {"thinkingBudget": 0}},
-    }
-    d = _post(url, payload)
-    txt = d["candidates"][0]["content"]["parts"][0]["text"]
-    txt = txt.replace("```json", "").replace("```", "").strip()
-    return json.loads(txt)
+    """Rotacao diaria de keywords por categoria — cada dia varia, nao repete o mesmo produto/vendedor."""
+    SCANNER = [("wireless barcode scanner", "Leitor Sem Fio", "\U0001F4F6"), ("2d qr barcode scanner", "Leitor QR 2D", "\U0001F4F1"), ("bluetooth barcode scanner", "Leitor Bluetooth", "\U0001F535"), ("handheld barcode scanner", "Leitor de Mao", "\U0001F52B")]
+    PRINTER = [("thermal label printer", "Impressora Termica", "\U0001F5A8"), ("4x6 shipping label printer", "Impressora 4x6", "\U0001F3F7"), ("bluetooth label printer", "Impressora Bluetooth", "\U0001F5A8")]
+    PACKAGING = [("barcode label rolls", "Rolos de Etiqueta", "\U0001F3F7"), ("4x6 thermal labels", "Etiquetas 4x6", "\U0001F3F7"), ("jewelry hang tags", "Tags de Joia", "\U0001F516"), ("kraft swing tags", "Tags Kraft", "\U0001F516"), ("tissue paper wrapping", "Papel de Seda", "\U0001F381"), ("velvet jewelry pouch", "Saquinho de Veludo", "\U0001F49C"), ("poly mailer bags", "Envelope Plastico", "\U0001F4E6")]
+    FASHION = [("western plaid shirt women", "Camisa Xadrez Western", "\U0001F457"), ("cowboy boots women", "Bota Cowboy Fem", "\U0001F462"), ("cowboy hat", "Chapeu Cowboy", "\U0001F920"), ("cowgirl boots", "Bota Cowgirl", "\U0001F462"), ("fringe suede jacket", "Jaqueta de Franjas", "\U0001F9E5"), ("western denim shirt men", "Camisa Jeans Western", "\U0001F454"), ("bandana", "Bandana", "\U0001F53B")]
+    JEWELRY = [("gold hoop earrings", "Brinco de Argola", "\U0001F442"), ("layered necklace", "Colar em Camadas", "\U0001F4FF"), ("stainless steel ring", "Anel de Aco", "\U0001F48D"), ("pearl drop earrings", "Brinco de Perola", "\U0001F9AA"), ("stud earrings set", "Kit de Brincos", "✨"), ("pendant necklace", "Colar com Pingente", "\U0001F4FF"), ("charm bracelet", "Pulseira Berloque", "\U0001F517"), ("anklet", "Tornozeleira", "\U0001F9B6"), ("choker necklace", "Choker", "\U0001F380"), ("cuff bracelet", "Bracelete", "⭕"), ("huggie earrings", "Argolinha", "\U0001F442")]
+    ACCESSORY = [("leather belt women", "Cinto de Couro", "\U0001FAA2"), ("silk scarf", "Lenco de Seda", "\U0001F9E3"), ("hair claw clip", "Presilha", "\U0001F487"), ("sunglasses women", "Oculos de Sol", "\U0001F576"), ("crossbody bag", "Bolsa Transversal", "\U0001F45C"), ("beaded bracelet", "Pulseira Micanga", "\U0001F4FF"), ("brooch pin", "Broche", "\U0001F4CC")]
+    slots = [("hardware", SCANNER, 0), ("hardware", PRINTER, 3), ("packaging", PACKAGING, 1),
+             ("country_fashion", FASHION, 2), ("jewelry", JEWELRY, 5), ("country_fashion", ACCESSORY, 4)]
+    doy = datetime.now(timezone.utc).timetuple().tm_yday
+    ideas = []
+    for cat, pool, off in slots:
+        en, pt, emoji = pool[(doy + off) % len(pool)]
+        ideas.append({"name_en": en.title(), "name_pt": pt, "emoji": emoji,
+                      "category": cat, "keyword": en, "country": "A confirmar", "supplier": "A confirmar"})
+    return ideas[:n]
 
 
 # ---------- 2. Keepa: preço real + BSR ----------
@@ -183,8 +169,9 @@ def keepa_products(asins):
         def val(i):
             return avg90[i] if len(avg90) > i and avg90[i] not in (None, -1) else None
         price = val(1) or val(0)   # New price senão Amazon price (pence)
-        img_id = (p.get("imagesCSV") or "").split(",")[0].strip()
-        image = f"https://images-na.ssl-images-amazon.com/images/I/{img_id}" if img_id else ""
+        imgs = p.get("images") or []
+        img_name = (imgs[0].get("m") or imgs[0].get("l")) if imgs else ""
+        image = f"https://m.media-amazon.com/images/I/{img_name}" if img_name else ""
         out.append({
             "asin": p.get("asin"),
             "price_gbp": round(price / 100, 2) if price else None,
@@ -221,6 +208,13 @@ def enrich(idea):
     if not cands:
         out["status"] = "sem match vendavel na faixa"
         return out
+    # Relevancia: o titulo tem que conter uma palavra-chave forte da busca
+    # (evita casar "camisa xadrez" com um colete so porque vende mais).
+    STOP = {"women", "womens", "men", "mens", "kids", "unisex", "adult", "with", "for"}
+    kw_words = [w for w in kw.lower().split() if len(w) > 3 and w not in STOP]
+    rel = [p for p in cands if any(w in (p.get("title") or "").lower() for w in kw_words)]
+    if rel:
+        cands = rel
     best = min(cands, key=lambda p: p["bsr"])
     out.update(best)
     venda = best["price_gbp"]
@@ -323,7 +317,7 @@ def main():
     print(f"== Krato Miner v2 == {date_str} | {N_IDEAS} ideias | BSR max {BSR_MAX} | faixa £{PRICE_MIN}-{PRICE_MAX}")
 
     ideas = gemini_ideas(N_IDEAS)
-    print(f"Gemini propôs {len(ideas)} ideias:", [i.get("name_en") for i in ideas])
+    print(f"Ideias do dia ({len(ideas)}, rotação):", [i.get("keyword") for i in ideas])
 
     rows = []
     for i, idea in enumerate(ideas, 1):
