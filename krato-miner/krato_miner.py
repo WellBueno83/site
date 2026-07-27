@@ -293,8 +293,45 @@ def airtable_write(date_str, sessid, html_report):
         return json.loads(r.read().decode())
 
 
-# ---------- 5. E-mail (visual, com imagens) ----------
-def send_email(subject, html_report):
+# ---------- 5. Planilha de leads (o que o Keepa entrega) ----------
+def build_catalog_xlsx(rows):
+    """Gera a planilha de leads do dia. Retorna (bytes, nome) ou (None, None) se faltar openpyxl."""
+    try:
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+    except Exception as e:
+        print("  [xlsx] openpyxl indisponivel, e-mail sem anexo:", e)
+        return None, None
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Leads"
+    hdr = ["Produto", "PT", "Categoria", "Keyword (busca)", "Preco Amazon (GBP)",
+           "BSR (demanda)", "Custo alvo 20% liq", "Custo alvo 30% liq", "Status", "Imagem"]
+    ws.append(hdr)
+    for c in ws[1]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1A1A2E")
+        c.alignment = Alignment(horizontal="center", wrap_text=True)
+    for r in rows:
+        ws.append([r.get("name_en"), r.get("name_pt"), r.get("category"), r.get("keyword"),
+                   r.get("price_gbp"), r.get("bsr"), r.get("cost_20"), r.get("cost_30"),
+                   r.get("status"), r.get("image")])
+    for row in ws.iter_rows(min_row=2):
+        for i in (5, 7, 8):
+            if isinstance(row[i - 1].value, (int, float)):
+                row[i - 1].number_format = "£#,##0.00"
+    for i, w in enumerate([22, 20, 15, 22, 16, 12, 16, 16, 22, 42], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), "krato-leads.xlsx"
+
+
+# ---------- 6. E-mail (visual, com imagens + planilha anexa) ----------
+def send_email(subject, html_report, xlsx_bytes=None, xlsx_name="krato-leads.xlsx"):
     if not (GMAIL_USER and GMAIL_APP_PASSWORD):
         print("  [email] sem creds Gmail - pulando envio (grava so no Airtable)")
         return
@@ -304,10 +341,14 @@ def send_email(subject, html_report):
     msg["To"] = EMAIL_TO
     msg.set_content("Seu leitor nao suporta HTML. Veja o relatorio no Airtable.")
     msg.add_alternative(html_report, subtype="html")
+    if xlsx_bytes:
+        msg.add_attachment(xlsx_bytes, maintype="application",
+                           subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           filename=xlsx_name)
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
         s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         s.send_message(msg)
-    print("  [email] enviado para", EMAIL_TO)
+    print("  [email] enviado para", EMAIL_TO, ("(com planilha)" if xlsx_bytes else "(sem anexo)"))
 
 
 def main():
@@ -329,7 +370,9 @@ def main():
     report = build_report(rows, date_str)
     res = airtable_write(date_str, sessid, report)
     print("Airtable record:", res.get("id"))
-    send_email(f"Krato - Pesquisa de Mercado (Keepa) | {date_str}", report)
+    xlsx_bytes, _ = build_catalog_xlsx(rows)
+    send_email(f"Krato - Pesquisa de Mercado (Keepa) | {date_str}", report,
+               xlsx_bytes, f"krato-leads-{now.strftime('%Y%m%d')}.xlsx")
     print("DONE")
 
 

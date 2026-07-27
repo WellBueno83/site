@@ -22,4 +22,4 @@ jobs:
           PRICE_MIN: "3"
           PRICE_MAX: "300"
           BSR_MAX: "500000"
-        run: python3 krato-miner/krato_miner.py
+        run: pip install -q openpyxl && python3 krato-miner/krato_miner.py
